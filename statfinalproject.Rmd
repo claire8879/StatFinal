@@ -1,0 +1,199 @@
+---
+output: html_notebook
+---
+
+# <u>**Statistical Learning Final Project**</u>
+### By: Claire Robinson
+#### crobinson9123@floridapoly.edu
+
+<br> <br> 
+
+## **Part 1: Introduction**
+
+For this project, I will be looking at Universal Bank dataset (The github containing the datset can be found [here](https://github.com/reisanar/datasets/blob/master/UniversalBank.csv)).
+
+1. What is my research question?
+  + Using the dataset, I want to understand if customers' attributes can help to predicate what kind of service (credit card, loan, etc.) they are most likely to get from the bank. These predictions can then be used in things such as advertising to ensure they get ads for the service they are most likely to use.
+  
+<br>
+
+2. Why do I care? Should you care?
+  + I care because a large part of data science (my major) is using data to better understand patterns and make predictions off of those patterns. In this case, figuring out what type of services a customer would want could be an integral part of my future employment. 
+  + You should care because this can help you to better undertsand machine learning and give a small, simplified glimpse into how companies target ads to you and make important business decisions.
+  
+<br>
+
+3. Related work?
+  + [Loan Classification with Logistic Regression](https://www.kaggle.com/code/gokhanegilmez/loan-classification-with-logistic-regression) by Gokhan Egilmez 
+  + [Loan Approval Prediction using KNN](https://www.kaggle.com/code/glorfindel94/loan-approval-prediction) by ERKAN ÇETINYAMAÇ
+
+<br> <br>
+
+## **Part 2: Exploratory Data Analysis (EDA)**
+```{r warning=FALSE}
+#Libraries
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(randomForest)
+library(rpart.plot)
+```
+
+
+```{r}
+#Load in the data
+bankdf <- read.csv('UniversalBank.txt')
+```
+
+
+The columns in the dataset can be further explained by the Data Dictionary from the Github:
+![Data Dictionary from the Github](C:\Users\Claire R\Downloads\bankdict.JPG)
+```{r}
+#Summary Stats
+summary(bankdf)
+```
+
+```{r fig.height=7, fig.width=15}
+#Correlation between features and target columns 
+
+corrs <- cor(bankdf[, c("ID", "Age", "Experience", "Income", "ZIP.Code", "Family", "CCAvg", "Education", "Mortgage")], bankdf[, c("Personal.Loan", "Securities.Account", "CD.Account", "Online", "CreditCard")])
+
+#Turn into dataframe
+cordf <- melt(corrs)
+
+#change column names 
+colnames(cordf) <- c("Feature", "Target", "Correlation")
+
+# Create a multiple bar graph using ggplot2
+ggplot(cordf, aes(x = Feature, y = Correlation, fill = Target)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Correlation between Features and Targets (Targets Seperated)", y = "Correlation coefficient")
+```
+From this, we can see which features are going to be useful in predicting our target variables and don't correlate much such as ID, Age, Experience, and ZIP.Code. We can also see that some of the target variables don't correlate very heavily with any of the features and, therefore, may be hard to predict. However, if we include the targets in the correlation, it may help by giving more data to work with instead of keeping them all separate
+
+```{r fig.height=8, fig.width=20}
+#Correlation between features and target columns 
+
+corrs <- cor(bankdf[, c("ID", "Age", "Experience", "Income", "ZIP.Code", "Family", "CCAvg", "Education", "Mortgage", "Personal.Loan", "Securities.Account", "CD.Account", "Online", "CreditCard")], bankdf[, c("Personal.Loan", "Securities.Account", "CD.Account", "Online", "CreditCard")])
+
+#Turn into dataframe
+cordf <- melt(corrs)
+
+#change column names 
+colnames(cordf) <- c("Feature", "Target", "Correlation")
+
+#Drop rows containing 1 (correlation to self)
+cordf <- subset(cordf, Correlation != 1)
+
+# Create a multiple bar graph using ggplot2
+ggplot(cordf, aes(x = Feature, y = Correlation, fill = Target)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Correlation between Features and Targets (Targets not Seperated)", y = "Correlation coefficient")
+```
+This does help out by giving the models access to more data. Personal.Loan and CD.Account look like they will be the easiest to predict while Securities.Account, Online, and CreditCard may not be very predictable with the current data we have.
+
+```{r}
+#removing low correlation features
+
+drop <- c("ID")
+new_bankdf = bankdf[,!(names(bankdf) %in% drop)]
+```
+
+
+## **Part 3: Methods**
+
+```{r warning=FALSE}
+# Create list of target variables
+target_vars <- c("Personal.Loan", "Securities.Account", "CD.Account", "Online", "CreditCard")
+
+# Create an empty list to store confusion matrices
+confusion_matrices <- list()
+
+# Create an empty list to store roc curves
+roc_curves <- list()
+
+# Loop over target variables
+for (target_var in target_vars) {
+  
+  # Create formula for logistic regression model
+  formula <- as.formula(paste(target_var, "~ ."))
+  
+  # Fit logistic regression model
+  model <- glm(formula, data = trainData, family = "binomial")
+  
+  # Make predictions on test data
+  preds <- predict(model, newdata = testData, type = "response")
+  preds <- ifelse(preds > 0.5, 1, 0)
+  
+  # Create confusion matrix
+  cm <- table(testData[[target_var]], preds)
+  confusion_matrices[[target_var]] <- cm
+  
+  # Calculate accuracy
+  accuracy <- sum(diag(cm)) / sum(cm)
+  
+  # Calculate precision
+  precision <- cm[2,2] / sum(cm[,2])
+  
+  # Calculate sensitivity
+  sensitivity <- cm[2,2] / sum(cm[2,])
+  
+  # Calculate F1-score
+  F1_score <- 2 * precision * recall / (precision + recall)
+  
+  # Print evaluation metrics
+  cat("Evaluation metrics for", target_var, "\n")
+  cat("Accuracy:", round(accuracy * 100, 2), "%\n")
+  cat("Precision:", round(precision * 100, 2), "%\n")
+  cat("Sensitivity:", round(recall * 100, 2), "%\n")
+  cat("F1-score:", round(F1_score * 100, 2), "%\n\n")
+  
+  # Create roc curve
+  roc_curve <- roc(testData[[target_var]], preds)
+  roc_curves[[target_var]] <- roc_curve
+  
+  # Calculate AUC
+  auc <- round(auc(roc_curve), 2)
+  cat("AUC for", target_var, ":", auc, "\n")
+}
+```
+
+```{r}
+# Display all confusion matrices
+confusion_matrices
+```
+
+
+```{r}
+# Display all ROC curves side by side
+plot(roc_curves$Personal.Loan, col = "blue", main = "ROC Curves for All Models")
+plot(roc_curves$Securities.Account, col = "red", add = TRUE)
+plot(roc_curves$CD.Account, col = "green", add = TRUE)
+plot(roc_curves$Online, col = "purple", add = TRUE)
+plot(roc_curves$CreditCard, col = "orange", add = TRUE)
+legend("bottomright", legend = target_vars, col = c("blue", "red", "green", "purple", "orange"), lty = 1)
+```
+
+
+
+
+(b) Part 2: Exploratory Data Analysis (EDA)
+
+Compute relevant descriptive statistics, including summary statistics and visualization of the data.
+
+Also address what the exploratory data analysis suggests about your research question.
+
+(c) Part 3: Methods
+
+Check any conditions needed to support your analysis. Review the structure of your data, and test the effectiveness of the statistical learning methods you chose for your work.
+
+Describe the motivation behind your analysis, and explain your findings.
+
+Be sure to interpret your results in the context of the problem.
+
+(d) Part 4: Conclusions
+
+Summarize your findings.
+
+Include a discussion of what you have learned about your initial research question and the data you used. You may also want to note limitations in your study and include ideas for possible future research.
